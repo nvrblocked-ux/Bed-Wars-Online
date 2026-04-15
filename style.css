@@ -1,0 +1,32 @@
+body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background-color: #000; }
+#uiLayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+.interactive { pointer-events: auto; }
+
+#mainMenu {
+    position: absolute; width: 100%; height: 100%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: radial-gradient(circle, transparent 20%, rgba(0,0,0,0.9) 100%);
+    color: white;
+}
+
+.menu-panel {
+    background: rgba(20, 20, 20, 0.95); padding: 30px; border: 3px solid #ff5533;
+    border-radius: 12px; min-width: 320px; text-align: center;
+}
+
+h1 { font-size: 3.5rem; text-shadow: 4px 4px 0px #ff5533; text-transform: uppercase; }
+button {
+    background: #ff5533; color: white; border: none; padding: 15px; 
+    font-size: 1.2rem; cursor: pointer; width: 100%; margin-top: 10px; border-radius: 5px;
+}
+button:hover { background: #ff7755; }
+
+#teamGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+#btnRed { background: #cc2222; }
+#btnBlue { background: #2222cc; }
+#btnGreen { background: #22cc22; }
+#btnYellow { background: #cccc22; color: black; }
+
+#hud { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; border-left: 5px solid #ff5533; }
+#crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); }
+.hidden { display: none !important; }
