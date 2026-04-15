@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bedwars Online: REAL Multiplayer</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background-color: #000; }
+  #uiLayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+  .interactive { pointer-events: auto; }
+  #mainMenu {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: radial-gradient(circle, transparent 20%, rgba(0,0,0,0.8) 100%); color: white;
+  }
+  .menu-panel { background: rgba(30, 30, 30, 0.9); padding: 30px; border: 3px solid #ff5533; border-radius: 8px; min-width: 300px; text-align: center; }
+  button { background: #ff5533; color: white; border: none; padding: 15px 30px; font-size: 1.5rem; cursor: pointer; width: 100%; margin-top: 10px; }
+  .team-btn { font-size: 1.2rem; }
+  #btnRed { background: #ff3333; } #btnBlue { background: #3333ff; }
+  #hud { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; }
+  #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="uiLayer">
+  <div id="mainMenu" class="interactive">
+    <h1>Bedwars : Online</h1>
+    <div id="panelPlay" class="menu-panel">
+      <button id="playBtn">ENTER LOBBY</button>
+    </div>
+    <div id="panelTeams" class="menu-panel hidden">
+      <h2>Select Team</h2>
+      <button class="team-btn" id="btnRed">Red Team</button>
+      <button class="team-btn" id="btnBlue">Blue Team</button>
+    </div>
+    <div id="panelMatchmaking" class="menu-panel hidden">
+      <h2 id="mmStatus">Waiting for others...</h2>
+      <h1 id="countdownDisplay" style="color: yellow;"></h1>
+    </div>
+  </div>
+  <div id="hud" class="hidden">Team: <span id="myTeamDisplay">None</span></div>
+  <div id="crosshair" class="hidden"></div>
+</div>
+
+<script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.153.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.153.0/examples/jsm/"
+    }
+  }
+</script>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, set, push, onValue, onChildAdded, onChildChanged, onDisconnect } 
+    from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+  // --- FIREBASE CONFIG ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyC3Gc_DfcZDCBLxKoDgdlruBPdPNLBOVAo",
+    authDomain: "bedwars-2f641.firebaseapp.com",
+    projectId: "bedwars-2f641",
+    storageBucket: "bedwars-2f641.firebasestorage.app",
+    messagingSenderId: "158660772996",
+    appId: "1:158660772996:web:d7eacea89d9e2e4115aed1",
+    databaseURL: "https://bedwars-2f641-default-rtdb.firebaseio.com"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+  const myPlayerId = Math.floor(Math.random() * 1000000).toString();
+  const playerRef = ref(db, `players/${myPlayerId}`);
+  const allPlayersRef = ref(db, 'players');
+
+  // --- THREE.JS VARS ---
+  let scene, camera, renderer, controls;
+  let otherPlayers = {}; 
+  let myTeam = null;
+  let move = { f: false, b: false, l: false, r: false };
+  let velocity = new THREE.Vector3();
+
+  init();
+  animate();
+
+  function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 5, 15);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    controls = new PointerLockControls(camera, document.body);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+    // --- UI LOGIC ---
+    document.getElementById('playBtn').addEventListener('click', () => {
+      document.getElementById('panelPlay').classList.add('hidden');
+      document.getElementById('panelTeams').classList.remove('hidden');
+    });
+
+    document.querySelectorAll('.team-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        myTeam = e.target.id.replace('btn', '');
+        document.getElementById('myTeamDisplay').innerText = myTeam;
+        joinGame(myTeam);
+      });
+    });
+
+    setupMultiplayerListeners();
+  }
+
+  function joinGame(team) {
+    // Save my player to Firebase
+    set(playerRef, {
+      id: myPlayerId,
+      team: team,
+      x: 0, y: 5, z: 0,
+      lastUpdate: Date.now()
+    });
+
+    // Remove player when they close the tab
+    onDisconnect(playerRef).remove();
+
+    document.getElementById('panelTeams').classList.add('hidden');
+    document.getElementById('panelMatchmaking').classList.remove('hidden');
+    
+    // Simulate/Start actual gameplay lock
+    setTimeout(() => {
+        document.getElementById('mainMenu').classList.add('hidden');
+        document.getElementById('hud').classList.remove('hidden');
+        document.getElementById('crosshair').classList.remove('hidden');
+        buildMap();
+        controls.lock();
+    }, 3000); 
+  }
+
+  function setupMultiplayerListeners() {
+    // Listen for NEW players joining
+    onChildAdded(allPlayersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data.id !== myPlayerId) {
+        createPlayerMesh(data);
+      }
+    });
+
+    // Listen for movement
+    onChildChanged(allPlayersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data.id !== myPlayerId && otherPlayers[data.id]) {
+        otherPlayers[data.id].position.set(data.x, data.y, data.z);
+      }
+    });
+  }
+
+  function createPlayerMesh(data) {
+    const geo = new THREE.BoxGeometry(1.5, 3, 1);
+    const mat = new THREE.MeshLambertMaterial({ color: data.team === 'Red' ? 0xff3333 : 0x3333ff });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    otherPlayers[data.id] = mesh;
+  }
+
+  function buildMap() {
+    const groundGeo = new THREE.PlaneGeometry(100, 100);
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI/2;
+    scene.add(ground);
+  }
+
+  // --- KEYBOARD ---
+  document.addEventListener('keydown', (e) => handleKey(e.code, true));
+  document.addEventListener('keyup', (e) => handleKey(e.code, false));
+  function handleKey(code, val) {
+    if (code === 'KeyW') move.f = val;
+    if (code === 'KeyS') move.b = val;
+    if (code === 'KeyA') move.l = val;
+    if (code === 'KeyD') move.r = val;
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    if (controls.isLocked) {
+      // Basic movement
+      if (move.f) camera.translateZ(-0.2);
+      if (move.b) camera.translateZ(0.2);
+      if (move.l) camera.translateX(-0.2);
+      if (move.r) camera.translateX(0.2);
+
+      // Update Firebase with my position (Throttle this for performance later!)
+      set(playerRef, {
+        id: myPlayerId,
+        team: myTeam,
+        x: camera.position.x,
+        y: camera.position.y - 2, // Offset so the block is on the floor
+        z: camera.position.z
+      });
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+  window.addEventListener('resize', onWindowResize);
+</script>
+</body>
+</html>
