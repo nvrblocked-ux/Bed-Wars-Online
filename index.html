@@ -1,59 +1,214 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bedwars Online</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: white; z-index: 10;
+        }
+        #status { font-size: 20px; margin-bottom: 20px; color: #00ffcc; }
+        button { padding: 15px 40px; font-size: 20px; cursor: pointer; background: #2ecc71; border: none; color: white; border-radius: 5px; }
+        button:disabled { background: #444; }
+    </style>
 </head>
 <body>
-    <div id="uiLayer">
-        <div id="mainMenu" class="interactive">
-            <h1>Bedwars Online</h1>
-            <div id="panelPlay" class="menu-panel">
-                <button id="playBtn">Join Server</button>
-            </div>
 
-            <div id="panelMode" class="menu-panel hidden">
-                <h2>Select Mode</h2>
-                <button id="mode2">2 Teams (1v1)</button>
-                <button id="mode4">4 Teams (4-way)</button>
-            </div>
-
-            <div id="panelTeams" class="menu-panel hidden">
-                <h2>Select Your Team</h2>
-                <div id="teamGrid">
-                    <button class="team-btn" id="btnRed">Red</button>
-                    <button class="team-btn" id="btnBlue">Blue</button>
-                    <button class="team-btn hidden" id="btnGreen">Green</button>
-                    <button class="team-btn hidden" id="btnYellow">Yellow</button>
-                </div>
-            </div>
-
-            <div id="panelMatchmaking" class="menu-panel hidden">
-                <h2 id="mmStatus">Generating Islands...</h2>
-                <h1 id="countdownDisplay"></h1>
-            </div>
-        </div>
-
-        <div id="hud" class="hidden">
-            <div class="stats">
-                <strong>ID:</strong> <span id="myIdDisplay">---</span> | 
-                <strong>Team:</strong> <span id="myTeamDisplay">---</span>
-            </div>
-            <div class="controls-hint">WASD: Move | Space: Jump</div>
-        </div>
-        <div id="crosshair" class="hidden"></div>
+    <div id="menu">
+        <h1>BEDWARS JS</h1>
+        <div id="status">Ready</div>
+        <button id="startBtn">SEARCH FOR GAME</button>
     </div>
 
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.153.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.153.0/examples/jsm/"
-            }
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, set, onValue, push, update, onDisconnect, runTransaction, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyC3Gc_DfcZDCBLxKoDgdlruBPdPNLBOVAo",
+            authDomain: "bedwars-2f641.firebaseapp.com",
+            databaseURL: "https://bedwars-2f641-default-rtdb.firebaseio.com",
+            projectId: "bedwars-2f641",
+            storageBucket: "bedwars-2f641.firebasestorage.app",
+            messagingSenderId: "158660772996",
+            appId: "1:158660772996:web:d7eacea89d9e2e4115aed1"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+
+        let scene, camera, renderer, player;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, canJump = false;
+        let isGameRunning = false;
+        let velocityY = 0;
+        const gravity = -0.012, jumpForce = 0.25;
+
+        let yawObject = new THREE.Object3D();
+        let pitchObject = new THREE.Object3D();
+        const platforms = [];
+
+        let currentLobbyId = null;
+        let myPlayerId = Math.random().toString(36).substring(7); // Simple ID for browser
+        let isMasterClient = false;
+        let myTeam = 'none';
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+            const sun = new THREE.DirectionalLight(0xffffff, 1);
+            sun.position.set(50, 100, 50);
+            scene.add(sun);
+
+            // Build Islands
+            const createIsland = (x, z, size, color) => {
+                const island = new THREE.Mesh(new THREE.BoxGeometry(size, 1, size), new THREE.MeshStandardMaterial({ color }));
+                island.position.set(x, 0, z);
+                scene.add(island);
+                platforms.push({ x, z, size });
+            };
+            createIsland(60, 60, 15, 0xff0000); // Red
+            createIsland(-60, 60, 15, 0x0000ff); // Blue
+            createIsland(60, -60, 15, 0x00ff00); // Green
+            createIsland(-60, -60, 15, 0xffff00); // Yellow
+            createIsland(0, 0, 25, 0x555555); // Mid
+
+            // Create Player Mesh
+            player = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 0.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            body.position.y = 0.75;
+            player.add(body);
+            scene.add(player);
+            player.add(yawObject);
+            yawObject.add(pitchObject);
+            camera.position.set(0, 2, 6);
+            pitchObject.add(camera);
+
+            setupControls();
+            animate();
         }
+
+        async function findGame() {
+            const statusEl = document.getElementById('status');
+            const snap = await get(ref(db, 'lobbies'));
+            const lobbies = snap.val() || {};
+            let foundId = null;
+
+            for (let id in lobbies) {
+                if (!lobbies[id].started) { foundId = id; break; }
+            }
+
+            if (!foundId) {
+                const newRef = push(ref(db, 'lobbies'));
+                currentLobbyId = newRef.key;
+                isMasterClient = true;
+                await set(newRef, { started: false, playerCount: 0, startTime: Date.now() });
+            } else {
+                currentLobbyId = foundId;
+            }
+            joinLobby();
+        }
+
+        async function joinLobby() {
+            const pRef = ref(db, `lobbies/${currentLobbyId}/players/${myPlayerId}`);
+            await set(pRef, { x: 0, y: 0, z: 0, team: 'none' });
+            onDisconnect(pRef).remove();
+            await runTransaction(ref(db, `lobbies/${currentLobbyId}/playerCount`), c => (c || 0) + 1);
+
+            onValue(ref(db, `lobbies/${currentLobbyId}`), (snap) => {
+                const lobby = snap.val();
+                if (!lobby) return;
+
+                if (lobby.started && !isGameRunning) {
+                    myTeam = (lobby.players && lobby.players[myPlayerId]) ? lobby.players[myPlayerId].team : 'red';
+                    isGameRunning = true;
+                    document.getElementById('menu').style.display = 'none';
+                    spawn();
+                }
+
+                if (isMasterClient && !lobby.started) {
+                    const time = Math.max(0, 10 - Math.floor((Date.now() - lobby.startTime) / 1000));
+                    document.getElementById('status').innerText = `Starting in ${time}s...`;
+                    if (time <= 0) {
+                        const updates = {};
+                        updates[`/lobbies/${currentLobbyId}/started`] = true;
+                        const ids = Object.keys(lobby.players);
+                        ids.forEach((id, i) => { updates[`/lobbies/${currentLobbyId}/players/${id}/team`] = ['red','blue','green','yellow'][i%4]; });
+                        update(ref(db), updates);
+                    }
+                }
+            });
+        }
+
+        function spawn() {
+            const pts = { red: [60,60], blue: [-60,60], green: [60,-60], yellow: [-60,-60] };
+            const p = pts[myTeam] || [60,60];
+            player.position.set(p[0], 10, p[1]);
+        }
+
+        function setupControls() {
+            window.addEventListener('keydown', e => {
+                if (e.code === 'KeyW') moveForward = true;
+                if (e.code === 'KeyS') moveBackward = true;
+                if (e.code === 'KeyA') moveLeft = true;
+                if (e.code === 'KeyD') moveRight = true;
+                if (e.code === 'Space' && canJump) { velocityY = jumpForce; canJump = false; }
+            });
+            window.addEventListener('keyup', e => {
+                if (e.code === 'KeyW') moveForward = false;
+                if (e.code === 'KeyS') moveBackward = false;
+                if (e.code === 'KeyA') moveLeft = false;
+                if (e.code === 'KeyD') moveRight = false;
+            });
+            window.addEventListener('mousemove', e => {
+                if (document.pointerLockElement) {
+                    yawObject.rotation.y -= e.movementX * 0.002;
+                    pitchObject.rotation.x -= e.movementY * 0.002;
+                }
+            });
+            document.getElementById('startBtn').onclick = () => {
+                document.getElementById('startBtn').disabled = true;
+                document.body.requestPointerLock();
+                findGame();
+            };
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (isGameRunning) {
+                const speed = 0.3;
+                if (moveForward) player.translateZ(-speed);
+                if (moveBackward) player.translateZ(speed);
+                if (moveLeft) player.translateX(-speed);
+                if (moveRight) player.translateX(speed);
+
+                player.rotation.y += yawObject.rotation.y;
+                yawObject.rotation.y = 0;
+
+                velocityY += gravity;
+                player.position.y += velocityY;
+
+                platforms.forEach(p => {
+                    if (Math.abs(player.position.x - p.x) < p.size/2 && Math.abs(player.position.z - p.z) < p.size/2) {
+                        if (player.position.y <= 0.5 && player.position.y > -0.5) {
+                            player.position.y = 0.5; velocityY = 0; canJump = true;
+                        }
+                    }
+                });
+                if (player.position.y < -20) spawn();
+            }
+            renderer.render(scene, camera);
+        }
+
+        init();
     </script>
-    <script type="module" src="game.js"></script>
 </body>
-</html>v
+</html>
